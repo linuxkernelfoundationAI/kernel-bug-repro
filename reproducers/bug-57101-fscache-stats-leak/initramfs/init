@@ -1,0 +1,49 @@
+#!/bin/sh
+export PATH=/bin:/sbin
+
+mount -t proc proc /proc
+mount -t sysfs sysfs /sys
+mount -t devtmpfs devtmpfs /dev 2>/dev/null
+
+echo "=== BUG-57101 REPRO: kernel booted ==="
+uname -a
+
+echo "=== mounting debugfs ==="
+mkdir -p /sys/kernel/debug
+mount -t debugfs debugfs /sys/kernel/debug
+mount | grep debugfs
+
+echo "=== kmemleak: clearing baseline ==="
+if [ -e /sys/kernel/debug/kmemleak ]; then
+	echo clear > /sys/kernel/debug/kmemleak
+else
+	echo "!!! /sys/kernel/debug/kmemleak NOT PRESENT !!!"
+fi
+
+echo "=== reading /proc/fs/fscache/stats x4 (triggers single_open leak on each open) ==="
+i=1
+while [ $i -le 4 ]; do
+	echo "--- read #$i ---"
+	cat /proc/fs/fscache/stats
+	i=$((i+1))
+done
+
+echo "=== settling (kmemleak MSECS_MIN_AGE) ==="
+sleep 5
+
+echo "=== triggering kmemleak scan (pass 1) ==="
+echo scan > /sys/kernel/debug/kmemleak
+sleep 3
+echo "=== triggering kmemleak scan (pass 2) ==="
+echo scan > /sys/kernel/debug/kmemleak
+sleep 2
+
+echo "=== KMEMLEAK REPORT BEGIN ==="
+cat /sys/kernel/debug/kmemleak
+echo "=== KMEMLEAK REPORT END ==="
+
+echo "=== DONE: bug-57101 repro complete ==="
+sleep 2
+poweroff -f 2>/dev/null
+echo o > /proc/sysrq-trigger 2>/dev/null
+sleep 5
