@@ -1,0 +1,46 @@
+#!/bin/busybox sh
+# Minimal init for bug-57101 (fscache/stats memory leak) reproduction.
+/bin/busybox mkdir -p /proc /sys /dev /sys/kernel/debug
+/bin/busybox mount -t proc proc /proc
+/bin/busybox mount -t sysfs sysfs /sys
+/bin/busybox mount -t devtmpfs devtmpfs /dev
+
+/bin/busybox echo "[repro] kernel up:"
+/bin/busybox uname -a
+
+/bin/busybox mount -t debugfs debugfs /sys/kernel/debug
+if [ ! -e /sys/kernel/debug/kmemleak ]; then
+	/bin/busybox echo "[repro] FATAL: /sys/kernel/debug/kmemleak missing (kmemleak not enabled?)"
+fi
+
+/bin/busybox echo "[repro] clearing kmemleak baseline"
+/bin/busybox echo clear > /sys/kernel/debug/kmemleak
+
+/bin/busybox echo "[repro] opening /proc/fs/fscache/stats 4 times"
+n=1
+while [ "$n" -le 4 ]; do
+	/bin/busybox echo "[repro] --- open #$n ---"
+	/bin/busybox cat /proc/fs/fscache/stats
+	n=$((n + 1))
+done
+
+/bin/busybox echo "[repro] letting allocations age past kmemleak min age"
+/bin/busybox sleep 5
+
+/bin/busybox echo "[repro] kmemleak scan pass 1"
+/bin/busybox echo scan > /sys/kernel/debug/kmemleak
+/bin/busybox sleep 3
+
+/bin/busybox echo "[repro] kmemleak scan pass 2"
+/bin/busybox echo scan > /sys/kernel/debug/kmemleak
+/bin/busybox sleep 2
+
+/bin/busybox echo "[repro] ===== KMEMLEAK REPORT START ====="
+/bin/busybox cat /sys/kernel/debug/kmemleak
+/bin/busybox echo "[repro] ===== KMEMLEAK REPORT END ====="
+
+/bin/busybox echo "[repro] complete, powering off"
+/bin/busybox sleep 1
+/bin/busybox poweroff -f
+/bin/busybox echo o > /proc/sysrq-trigger
+/bin/busybox sleep 10
